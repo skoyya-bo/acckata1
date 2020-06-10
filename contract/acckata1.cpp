@@ -1,120 +1,162 @@
 #include <eosio/eosio.hpp>
 #include <eosio.token/eosio.token.hpp>
-//#include <eosio/asset.hpp>
 
 using namespace eosio;
 
 class acckata1 : eosio::contract {
     struct [[eosio::table]] account_balance
     {
-	name user;
-        std::map<uint64_t, asset> type_balance;
+	    name user;
+        std::map<std::string, double> type_balance;
         uint64_t primary_key() const { return user.value; }
     };
 
     using acc_table = eosio::multi_index<"user.ind"_n, account_balance>;
+
+    constexpr static char default_category[] = "default";
+
+    double get_default_balance(name nm) { 
+        return eosio::token::get_balance(eosio::name("eosio.token"), nm, eosio::symbol_code("SYS")).amount;
+    }
 
   public:
     // Use contract's constructor
     using contract::contract;
 
     // Deposit into an existing account
-    [[eosio::action]] void deposit(name user, asset amount) {
-
-
+    [[eosio::action]] void deposit(name user, std::string type, double amount) {
         // Check user
         require_auth(user);
-
-	check(amount <= asset(0, amount.symbol), "Invalid amount to deposit, "+amount.to_string());
-
+	    check(amount >= 0, "Invalid amount to deposit");
         acc_table accounts{get_self(), 0};
-
-	auto account = accounts.get(user.value);//throws exception if account doesnt exists for user
-	account.type_balance[amount.symbol.raw()]  += amount;
+	    auto account = accounts.get(user.value);//throws exception if account doesnt exists for user
+	    account.type_balance[type]  += amount;
 	
-	//update
-	accounts.erase(account);
-	accounts.emplace(get_self(), [&](auto& acc) {
-                acc.user         = account.user;
-		acc.type_balance = account.type_balance;
-            });
+	    //update
+	    accounts.modify(accounts.find(user.value), user, [&](auto& acc) {
+            acc.user         = account.user;
+		    acc.type_balance = account.type_balance;
+        });
     }
 
     // Create an account
-    [[eosio::action]] void create(name user, name acc_type, asset def_amount) {
+    [[eosio::action]] void createusr(name user) {
         // Check user
-	require_auth(user);
+	    require_auth(user);
+        acc_table accounts{get_self(), 0};
 
-	acc_table accounts{get_self(), 0};
-	accounts.emplace(get_self(), [&](auto& acc) {
+	    accounts.emplace(get_self(), [&](auto& acc) {
             acc.user         = user;
-            acc.type_balance[def_amount.symbol.raw()] = def_amount;
-	});
+            acc.type_balance[default_category] = get_default_balance(user);
+	    });
     }
 
-    // Transfer amount between categories/symbols
-    [[eosio::action]] void transfer(name user, std::string from_acc_typ, std::string to_acc_typ, double trnsf_amnt ) {
+    //Delete user
+    [[eosio::action]] void deleteusr(name user) {
         // Check user
-	require_auth(user);
+	    require_auth(user);
+        acc_table accounts{get_self(), 0};
+        auto account = accounts.get(user.value);//throws exception if account doesnt exists for user
+        accounts.erase(accounts.find(user.value));
+    }
 
-	acc_table accounts{get_self(), 0};
-	auto account = accounts.get(user.value);
-	auto it = account.type_balance.find(symbol(from_acc_typ, 4).raw());
-	check(it != std::end(account.type_balance), "Account type "+from_acc_typ+" doesnt exists");
-	auto acc_balance = it->second;
-	check(acc_balance.amount >=trnsf_amnt , "Insufficient balance in acc type: "+ from_acc_typ);
-	acc_balance.amount -= trnsf_amnt;
-	account.type_balance[symbol(from_acc_typ, 4).raw()] = acc_balance;
-	account.type_balance[symbol(to_acc_typ, 4).raw()] += asset(trnsf_amnt, symbol(to_acc_typ, 4));
+    //create category
+    [[eosio::action]] void addctgry(name user, std::string ctgry, double balance) {
+        check( ctgry != default_category, "Can not create default category");
+        check(get_current_balabce(user) <= balance, "Insufficient balance");
+	    require_auth(user);
+        acc_table accounts{get_self(), 0};
+	    auto account = accounts.get(user.value);
+        account.type_balance[ctgry] = balance;
+	    accounts.modify(accounts.find(user.value), user, [&](auto& acc) {
+            acc.user         = account.user;
+		    acc.type_balance = account.type_balance;
+        });
+    }
 
-	//update
-	accounts.erase(account);
-	accounts.emplace(get_self(), [&](auto& acc) {
-                acc.user         = account.user;
-		acc.type_balance = account.type_balance;
-            });
+
+
+    // Transfer amount between categories
+    [[eosio::action]] void transferctg(name user, std::string fromcat, std::string tocat, double trnsfamnt ) {
+        // Check user
+	    require_auth(user);
+	    acc_table accounts{get_self(), 0};
+	    auto account = accounts.get(user.value);
+	    auto it = account.type_balance.find(fromcat);
+        if( it == std::end(account.type_balance)) {
+            print("HERE......");
+        }
+	    check(it != std::end(account.type_balance), "Account type "+fromcat+" doesnt exists");
+	    check(it->second >=trnsfamnt , "Insufficient balance in acc type: "+ fromcat);
+        auto type_balance = account.type_balance;
+	    type_balance[fromcat] = it->second - trnsfamnt;
+	    type_balance[tocat] += trnsfamnt;
+
+	    //update
+	    accounts.modify(accounts.find(user.value), user, [&](auto& acc) {
+            acc.user         = user;
+		    acc.type_balance = type_balance;
+        });
     }
 
   //Transfer amount accross accounts
-  [[eosio::action]] void transfer2(name from_user, name to_user, std::string from_acc_typ, std::string to_acc_typ, double trnsf_amnt) {
-	require_auth(from_user);
+  [[eosio::action]] void transferusr(name fromuser, name touser, std::string fromacctype, std::string toacctype, double trnsfamnt) {
+    	require_auth(fromuser);
 
-	acc_table accounts{get_self(), 0};
-	auto from_account = accounts.get(from_user.value);
-	auto to_account = accounts.get(to_user.value);
-	auto from_it = from_account.type_balance.find(symbol(from_acc_typ, 4).raw());
-	auto to_it = to_account.type_balance.find(symbol(to_acc_typ, 4).raw());
-	check(from_it != std::end(from_account.type_balance), "Account type "+from_acc_typ+" doesnt exists");
-	check(to_it != std::end(to_account.type_balance), "Account type "+to_acc_typ+" doesnt exists");
+	    acc_table accounts{get_self(), 0};
+	    auto from_account = accounts.get(fromuser.value);
+	    auto to_account = accounts.get(touser.value);
+	    auto from_it = from_account.type_balance.find(fromacctype);
+	    auto to_it = to_account.type_balance.find(toacctype);
+	    check(from_it != std::end(from_account.type_balance), "Account type "+fromacctype+" doesnt exists");
+	    //check(to_it != std::end(to_account.type_balance), "Account type "+toacctype+" doesnt exists");
 
-	auto from_acc_balance = from_it->second;
-	auto to_acc_balance = to_it->second;
-	check(from_acc_balance.amount >= trnsf_amnt, "Insufficient balance in from user["+from_user.to_string()+"] acc_type["+from_acc_typ+"]");	
+	    auto from_acc_balance = from_it->second;
+	    auto to_acc_balance = to_it->second;
+	    check(from_acc_balance >= trnsfamnt, "Insufficient balance in from user["+fromuser.to_string()+"] acc type["+fromacctype+"]");	
 
-	from_acc_balance.amount -= trnsf_amnt;
-	to_acc_balance.amount += trnsf_amnt;
+	    from_acc_balance -= trnsfamnt;
+	    to_acc_balance += trnsfamnt;
+        auto from_type_balance = from_account.type_balance;
+        auto to_type_balance = to_account.type_balance;
+        from_type_balance[fromacctype] = from_acc_balance;
+        to_type_balance[toacctype] = to_acc_balance;
 
-	//update
-	accounts.erase(from_account);
-	accounts.emplace(get_self(), [&](auto& acc) {
-                acc.user         = from_account.user;
-		acc.type_balance = from_account.type_balance;
-            });
-	accounts.erase(to_account);
-	accounts.emplace(get_self(), [&](auto& acc) {
-                acc.user         = to_account.user;
-		acc.type_balance = to_account.type_balance;
-            });
+
+	    //update
+	    accounts.modify(accounts.find(fromuser.value), fromuser, [&](auto& acc) {
+            acc.user         = from_account.user;
+		    acc.type_balance = from_type_balance;
+        });
+	    accounts.modify(accounts.find(touser.value), touser, [&](auto& acc) {
+            acc.user         = to_account.user;
+		    acc.type_balance = to_type_balance;
+        });
    }
 
    //Show all users and their accounts and balance information
    [[eosio::action]] void showall() {
         require_auth(get_self());
-	acc_table accounts{get_self(), 0};
-	for( auto acc=std::begin(accounts); acc != std::end(accounts); ++acc) {
-	    for(auto it2=std::begin(acc->type_balance); it2 != std::end(acc->type_balance); ++it2) {
-		print(acc->user.to_string(), " -- ", it2->second.to_string(), "\n");
-		}
-	}
+	    acc_table accounts{get_self(), 0};
+	    for( auto acc=std::begin(accounts); acc != std::end(accounts); ++acc) {
+	        for(auto it2=std::begin(acc->type_balance); it2 != std::end(acc->type_balance); ++it2) {
+		        print(acc->user.to_string(), " -- ", it2->first, " -- " , std::to_string(it2->second), "\n");
+		    }
+	    }
    }
+
+   private:
+    
+    double get_current_balabce(name nm) {
+        double token_amt = get_default_balance(nm);
+        acc_table accounts{get_self(), 0};
+
+        auto account = accounts.get(nm.value);
+        double curr_balance =0.0;
+        for( auto it = std::begin(account.type_balance); it != std::end(account.type_balance); ++it ) {
+            if ( it->first != default_category)
+                curr_balance += it->second;
+        }
+        return token_amt - curr_balance;
+    }
 };
