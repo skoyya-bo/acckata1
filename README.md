@@ -39,6 +39,7 @@ cleos push action acckata1  createusr '["acckata1"]' -p acckata1@active
 
 depost
 cleos push action acckata1  deposit '["skoyya", "default" 500]' -p skoyya@active
+cleos push action acckata1  deposit '["acckata1", "default", 700]' -p acckata1@active
 cleos push action acckata1  deposit '["acckata1", "check", 200]' -p acckata1@active
 
 transferctg

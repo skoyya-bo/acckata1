@@ -47,7 +47,7 @@ class acckata1 : eosio::contract {
 
 	    accounts.emplace(get_self(), [&](auto& acc) {
             acc.user         = user;
-            acc.type_balance[default_category] = get_default_balance(user);
+            acc.type_balance[default_category] = 0.0;//get_default_balance(user);
 	    });
     }
 
@@ -63,7 +63,7 @@ class acckata1 : eosio::contract {
     //create category
     [[eosio::action]] void addctgry(name user, std::string ctgry, double balance) {
         check( ctgry != default_category, "Can not create default category");
-        check(get_current_balabce(user) <= balance, "Insufficient balance");
+        //check(get_current_balabce(user) <= balance, "Insufficient balance");
 	    require_auth(user);
         acc_table accounts{get_self(), 0};
 	    auto account = accounts.get(user.value);
@@ -83,9 +83,6 @@ class acckata1 : eosio::contract {
 	    acc_table accounts{get_self(), 0};
 	    auto account = accounts.get(user.value);
 	    auto it = account.type_balance.find(fromcat);
-        if( it == std::end(account.type_balance)) {
-            print("HERE......");
-        }
 	    check(it != std::end(account.type_balance), "Account type "+fromcat+" doesnt exists");
 	    check(it->second >=trnsfamnt , "Insufficient balance in acc type: "+ fromcat);
         auto type_balance = account.type_balance;
